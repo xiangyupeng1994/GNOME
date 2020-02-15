@@ -76,6 +76,17 @@ class Player(object):
         self._option_to_buy = False # this option will turn true when  the player lands on a property that could be bought.
         # We always set it to false again at the end of the post_roll phase. It is an internal variable.
 
+        self._agent_memory = dict() # a scratchpad for the agent behind this player.
+
+
+    def change_decision_agent(self, handle_negative_cash_balance, make_pre_roll_move, make_out_of_turn_move, make_post_roll_move, make_buy_property_decision, make_bid):
+        self.handle_negative_cash_balance = handle_negative_cash_balance
+        self.make_pre_roll_move = make_pre_roll_move
+        self.make_out_of_turn_move = make_out_of_turn_move
+        self.make_post_roll_move = make_post_roll_move
+        self.make_buy_property_decision = make_buy_property_decision
+        self.make_bid = make_bid
+
 
     def begin_bankruptcy_proceedings(self, current_gameboard):
         """
@@ -97,6 +108,11 @@ class Player(object):
         params['current_gameboard'] = current_gameboard
         current_gameboard['history']['param'].append(params)
         current_gameboard['history']['return'].append(None)
+
+        self.num_total_houses = 0
+        self.num_total_hotels = 0
+        self.num_utilities_possessed = 0
+        self.num_railroads_possessed = 0
 
         self.currently_in_jail = False
         self.outstanding_property_offer['from_player'] = None
@@ -525,10 +541,10 @@ class Player(object):
         if len(self.mortgaged_assets) > 0:
             allowable_actions.add(free_mortgage)
 
-        if self.has_get_out_of_jail_chance_card or self.has_get_out_of_jail_community_chest_card:
+        if (self.has_get_out_of_jail_chance_card or self.has_get_out_of_jail_community_chest_card) and self.currently_in_jail:
             allowable_actions.add(use_get_out_of_jail_card)
 
-        if self.currently_in_jail:
+        if self.currently_in_jail and self.current_cash >= 50:
             allowable_actions.add(pay_jail_fine)
 
         if len(self.full_color_sets_possessed) > 0:
@@ -635,14 +651,28 @@ class Player(object):
         current_gameboard['history']['return'].append(t)
 
         if action_to_execute == skip_turn:
+            if self.is_property_offer_outstanding:
+                # player is clearly unwilling to accept the offer, so we negate it
+                self.is_property_offer_outstanding = False
+                self.outstanding_property_offer['from_player'] = None
+                self.outstanding_property_offer['asset'] = None
+                self.outstanding_property_offer['price'] = -1
+
             return self._execute_action(action_to_execute, parameters, current_gameboard)
 
 
         allowable_actions.add(concluded_actions)
         allowable_actions.remove(skip_turn) # from this time on, skip turn is not allowed.
-
-        while True:  # currently, we set no limits on this; the assumption is that eventually the player will 'pass the baton'
-            if action_to_execute == concluded_actions: # short of raising an exception, this is the only way to exit this function
+        count = 0
+        while count < 50: # the player is allowed up to 50 actions before we force conclude actions.
+            count += 1
+            if action_to_execute == concluded_actions:
+                if self.is_property_offer_outstanding:
+                    # player is clearly unwilling to accept the offer, so we negate it
+                    self.is_property_offer_outstanding = False
+                    self.outstanding_property_offer['from_player'] = None
+                    self.outstanding_property_offer['asset'] = None
+                    self.outstanding_property_offer['price'] = -1
                 return self._execute_action(action_to_execute, parameters, current_gameboard)
             else:
                 code = self._execute_action(action_to_execute, parameters, current_gameboard)
@@ -659,6 +689,15 @@ class Player(object):
                 params['code'] = code
                 current_gameboard['history']['param'].append(params)
                 current_gameboard['history']['return'].append(t)
+
+        # if we got here, we resolve property offers and move on.
+        if self.is_property_offer_outstanding:
+            # player is clearly unwilling to accept the offer, so we negate it
+            self.is_property_offer_outstanding = False
+            self.outstanding_property_offer['from_player'] = None
+            self.outstanding_property_offer['asset'] = None
+            self.outstanding_property_offer['price'] = -1
+        return self._execute_action(concluded_actions, dict(), current_gameboard)  # now we can conclude actions
 
     def make_out_of_turn_moves(self, current_gameboard):
         """
@@ -687,13 +726,26 @@ class Player(object):
         current_gameboard['history']['return'].append(t)
 
         if action_to_execute == skip_turn:
+            if self.is_property_offer_outstanding:
+                # player is clearly unwilling to accept the offer, so we negate it
+                self.is_property_offer_outstanding = False
+                self.outstanding_property_offer['from_player'] = None
+                self.outstanding_property_offer['asset'] = None
+                self.outstanding_property_offer['price'] = -1
             return self._execute_action(action_to_execute, parameters, current_gameboard)
 
         allowable_actions.add(concluded_actions)
         allowable_actions.remove(skip_turn)  # from this time on, skip turn is not allowed.
-
-        while True:  # currently, we set no limits on this; the assumption is that eventually the player will 'pass the baton'
-            if action_to_execute == concluded_actions:  # short of raising an exception, this is the only way to exit this function
+        count = 0
+        while count < 50:  # the player is allowed up to 50 actions before we force conclude actions.
+            count += 1
+            if action_to_execute == concluded_actions:
+                if self.is_property_offer_outstanding:
+                    # player is clearly unwilling to accept the offer, so we negate it
+                    self.is_property_offer_outstanding = False
+                    self.outstanding_property_offer['from_player'] = None
+                    self.outstanding_property_offer['asset'] = None
+                    self.outstanding_property_offer['price'] = -1
                 return self._execute_action(action_to_execute, parameters, current_gameboard)
             else:
                 code = self._execute_action(action_to_execute, parameters, current_gameboard)
@@ -710,6 +762,15 @@ class Player(object):
                 params['code'] = code
                 current_gameboard['history']['param'].append(params)
                 current_gameboard['history']['return'].append(t)
+
+        # if we got here, we resolve property offers and move on.
+        if self.is_property_offer_outstanding:
+            # player is clearly unwilling to accept the offer, so we negate it
+            self.is_property_offer_outstanding = False
+            self.outstanding_property_offer['from_player'] = None
+            self.outstanding_property_offer['asset'] = None
+            self.outstanding_property_offer['price'] = -1
+        return self._execute_action(concluded_actions, dict(), current_gameboard)  # now we can conclude actions
 
 
     def make_post_roll_moves(self, current_gameboard):
@@ -744,9 +805,10 @@ class Player(object):
         if action_to_execute == concluded_actions:
             self._force_buy_outcome(current_gameboard) # if option to buy is not set, this will make no difference.
             return self._execute_action(action_to_execute, parameters, current_gameboard) # now we can conclude actions
-
-        while True:
-            if action_to_execute == concluded_actions: # this is the only way to exit this function
+        count = 0
+        while count < 50:  # the player is allowed up to 50 actions before we force conclude actions.
+            count += 1
+            if action_to_execute == concluded_actions:
                 self._force_buy_outcome(current_gameboard)
                 return self._execute_action(action_to_execute, parameters, current_gameboard)  # now we can conclude actions
 
@@ -766,6 +828,9 @@ class Player(object):
                 current_gameboard['history']['param'].append(params)
                 current_gameboard['history']['return'].append(t)
                 # print action_to_execute
+
+        self._force_buy_outcome(current_gameboard) # if we got here, we need to conclude actions
+        return self._execute_action(concluded_actions, dict(), current_gameboard)  # now we can conclude actions
 
 
     def _force_buy_outcome(self, current_gameboard):
